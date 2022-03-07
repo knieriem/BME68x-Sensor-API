@@ -1187,16 +1187,53 @@ static uint8_t calc_gas_wait(uint16_t dur)
     return durval;
 }
 
-/* This internal API is used to read a single data of the sensor */
-static int8_t read_field_data(uint8_t index, struct bme68x_data *data, struct bme68x_dev *dev)
+/* This internal API is used to convert raw adc values to measurement values */
+static void decode_data_regs(struct bme68x_data *data, uint8_t buff[BME68X_LEN_FIELD], struct bme68x_dev *dev)
 {
-    int8_t rslt = BME68X_OK;
-    uint8_t buff[BME68X_LEN_FIELD] = { 0 };
     uint8_t gas_range_l, gas_range_h;
     uint32_t adc_temp;
     uint32_t adc_pres;
     uint16_t adc_hum;
     uint16_t adc_gas_res_low, adc_gas_res_high;
+
+    /* read the raw data from the sensor */
+    adc_pres = (uint32_t)(((uint32_t)buff[2] * 4096) | ((uint32_t)buff[3] * 16) | ((uint32_t)buff[4] / 16));
+    adc_temp = (uint32_t)(((uint32_t)buff[5] * 4096) | ((uint32_t)buff[6] * 16) | ((uint32_t)buff[7] / 16));
+    adc_hum = (uint16_t)(((uint32_t)buff[8] * 256) | (uint32_t)buff[9]);
+    adc_gas_res_low = (uint16_t)((uint32_t)buff[13] * 4 | (((uint32_t)buff[14]) / 64));
+    adc_gas_res_high = (uint16_t)((uint32_t)buff[15] * 4 | (((uint32_t)buff[16]) / 64));
+    gas_range_l = buff[14] & BME68X_GAS_RANGE_MSK;
+    gas_range_h = buff[16] & BME68X_GAS_RANGE_MSK;
+    if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
+    {
+        data->status |= buff[16] & BME68X_GASM_VALID_MSK;
+        data->status |= buff[16] & BME68X_HEAT_STAB_MSK;
+    }
+    else
+    {
+        data->status |= buff[14] & BME68X_GASM_VALID_MSK;
+        data->status |= buff[14] & BME68X_HEAT_STAB_MSK;
+    }
+
+    data->temperature = calc_temperature(adc_temp, dev);
+    data->pressure = calc_pressure(adc_pres, dev);
+    data->humidity = calc_humidity(adc_hum, dev);
+    if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
+    {
+        data->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);
+    }
+    else
+    {
+        data->gas_resistance = calc_gas_resistance_low(adc_gas_res_low, gas_range_l, dev);
+    }
+}
+
+
+/* This internal API is used to read a single data of the sensor */
+static int8_t read_field_data(uint8_t index, struct bme68x_data *data, struct bme68x_dev *dev)
+{
+    int8_t rslt = BME68X_OK;
+    uint8_t buff[BME68X_LEN_FIELD] = { 0 };
     uint8_t tries = 5;
 
     while ((tries) && (rslt == BME68X_OK))
@@ -1215,25 +1252,6 @@ static int8_t read_field_data(uint8_t index, struct bme68x_data *data, struct bm
         data->gas_index = buff[0] & BME68X_GAS_INDEX_MSK;
         data->meas_index = buff[1];
 
-        /* read the raw data from the sensor */
-        adc_pres = (uint32_t)(((uint32_t)buff[2] * 4096) | ((uint32_t)buff[3] * 16) | ((uint32_t)buff[4] / 16));
-        adc_temp = (uint32_t)(((uint32_t)buff[5] * 4096) | ((uint32_t)buff[6] * 16) | ((uint32_t)buff[7] / 16));
-        adc_hum = (uint16_t)(((uint32_t)buff[8] * 256) | (uint32_t)buff[9]);
-        adc_gas_res_low = (uint16_t)((uint32_t)buff[13] * 4 | (((uint32_t)buff[14]) / 64));
-        adc_gas_res_high = (uint16_t)((uint32_t)buff[15] * 4 | (((uint32_t)buff[16]) / 64));
-        gas_range_l = buff[14] & BME68X_GAS_RANGE_MSK;
-        gas_range_h = buff[16] & BME68X_GAS_RANGE_MSK;
-        if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
-        {
-            data->status |= buff[16] & BME68X_GASM_VALID_MSK;
-            data->status |= buff[16] & BME68X_HEAT_STAB_MSK;
-        }
-        else
-        {
-            data->status |= buff[14] & BME68X_GASM_VALID_MSK;
-            data->status |= buff[14] & BME68X_HEAT_STAB_MSK;
-        }
-
         if ((data->status & BME68X_NEW_DATA_MSK) && (rslt == BME68X_OK))
         {
             rslt = bme68x_get_regs(BME68X_REG_RES_HEAT0 + data->gas_index, &data->res_heat, 1, dev);
@@ -1249,18 +1267,7 @@ static int8_t read_field_data(uint8_t index, struct bme68x_data *data, struct bm
 
             if (rslt == BME68X_OK)
             {
-                data->temperature = calc_temperature(adc_temp, dev);
-                data->pressure = calc_pressure(adc_pres, dev);
-                data->humidity = calc_humidity(adc_hum, dev);
-                if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
-                {
-                    data->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);
-                }
-                else
-                {
-                    data->gas_resistance = calc_gas_resistance_low(adc_gas_res_low, gas_range_l, dev);
-                }
-
+                decode_data_regs(data, buff, dev);
                 break;
             }
         }
@@ -1281,11 +1288,6 @@ static int8_t read_all_field_data(struct bme68x_data * const data[], struct bme6
 {
     int8_t rslt = BME68X_OK;
     uint8_t buff[BME68X_LEN_FIELD * 3] = { 0 };
-    uint8_t gas_range_l, gas_range_h;
-    uint32_t adc_temp;
-    uint32_t adc_pres;
-    uint16_t adc_hum;
-    uint16_t adc_gas_res_low, adc_gas_res_high;
     uint8_t off;
     uint8_t set_val[30] = { 0 }; /* idac, res_heat, gas_wait */
     uint8_t i;
@@ -1312,42 +1314,12 @@ static int8_t read_all_field_data(struct bme68x_data * const data[], struct bme6
         data[i]->gas_index = buff[off] & BME68X_GAS_INDEX_MSK;
         data[i]->meas_index = buff[off + 1];
 
-        /* read the raw data from the sensor */
-        adc_pres =
-            (uint32_t) (((uint32_t) buff[off + 2] * 4096) | ((uint32_t) buff[off + 3] * 16) |
-                        ((uint32_t) buff[off + 4] / 16));
-        adc_temp =
-            (uint32_t) (((uint32_t) buff[off + 5] * 4096) | ((uint32_t) buff[off + 6] * 16) |
-                        ((uint32_t) buff[off + 7] / 16));
-        adc_hum = (uint16_t) (((uint32_t) buff[off + 8] * 256) | (uint32_t) buff[off + 9]);
-        adc_gas_res_low = (uint16_t) ((uint32_t) buff[off + 13] * 4 | (((uint32_t) buff[off + 14]) / 64));
-        adc_gas_res_high = (uint16_t) ((uint32_t) buff[off + 15] * 4 | (((uint32_t) buff[off + 16]) / 64));
-        gas_range_l = buff[off + 14] & BME68X_GAS_RANGE_MSK;
-        gas_range_h = buff[off + 16] & BME68X_GAS_RANGE_MSK;
-        if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
-        {
-            data[i]->status |= buff[off + 16] & BME68X_GASM_VALID_MSK;
-            data[i]->status |= buff[off + 16] & BME68X_HEAT_STAB_MSK;
-        }
-        else
-        {
-            data[i]->status |= buff[off + 14] & BME68X_GASM_VALID_MSK;
-            data[i]->status |= buff[off + 14] & BME68X_HEAT_STAB_MSK;
-        }
-
         data[i]->idac = set_val[data[i]->gas_index];
         data[i]->res_heat = set_val[10 + data[i]->gas_index];
         data[i]->gas_wait = set_val[20 + data[i]->gas_index];
-        data[i]->temperature = calc_temperature(adc_temp, dev);
-        data[i]->pressure = calc_pressure(adc_pres, dev);
-        data[i]->humidity = calc_humidity(adc_hum, dev);
-        if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
-        {
-            data[i]->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);
-        }
-        else
-        {
-            data[i]->gas_resistance = calc_gas_resistance_low(adc_gas_res_low, gas_range_l, dev);
+
+        if (data[i]->status & BME68X_NEW_DATA_MSK) {
+            decode_data_regs(data[i], &buff[off], dev);
         }
     }
 
