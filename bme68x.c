@@ -1215,9 +1215,24 @@ static void decode_data_regs(struct bme68x_data *data, uint8_t buff[BME68X_LEN_F
         data->status |= buff[14] & BME68X_HEAT_STAB_MSK;
     }
 
-    data->temperature = calc_temperature(adc_temp, dev);
-    data->pressure = calc_pressure(adc_pres, dev);
-    data->humidity = calc_humidity(adc_hum, dev);
+    if (adc_temp != 0x80000)
+    {
+        data->status |= BME68X_TEMPM_PRESENT_MSK;
+        data->temperature = calc_temperature(adc_temp, dev);
+    }
+
+    if (adc_pres != 0x80000)
+    {
+        data->status |= BME68X_PRESM_PRESENT_MSK;
+        data->pressure = calc_pressure(adc_pres, dev);
+    }
+
+    if (adc_hum != 0x8000)
+    {
+        data->status |= BME68X_HUMM_PRESENT_MSK;
+        data->humidity = calc_humidity(adc_hum, dev);
+    }
+
     if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
     {
         data->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);

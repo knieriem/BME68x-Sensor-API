@@ -572,6 +572,15 @@
 /* Mask for heater stability */
 #define BME68X_HEAT_STAB_MSK                      UINT8_C(0x10)
 
+/* Mask for pressure measurement valid */
+#define BME68X_PRESM_PRESENT_MSK                    UINT8_C(0x04)
+
+/* Mask for humidity measurement valid */
+#define BME68X_HUMM_PRESENT_MSK                     UINT8_C(0x02)
+
+/* Mask for temperature measurement valid */
+#define BME68X_TEMPM_PRESENT_MSK                    UINT8_C(0x01)
+
 /* Mask for SPI memory page */
 #define BME68X_MEM_PAGE_MSK                       UINT8_C(0x10)
 
