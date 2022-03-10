@@ -1233,13 +1233,15 @@ static void decode_data_regs(struct bme68x_data *data, uint8_t buff[BME68X_LEN_F
         data->humidity = calc_humidity(adc_hum, dev);
     }
 
-    if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
-    {
-        data->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);
-    }
-    else
-    {
-        data->gas_resistance = calc_gas_resistance_low(adc_gas_res_low, gas_range_l, dev);
+    if (data->status & BME68X_GASM_VALID_MSK) {
+        if (dev->variant_id == BME68X_VARIANT_GAS_HIGH)
+        {
+            data->gas_resistance = calc_gas_resistance_high(adc_gas_res_high, gas_range_h);
+        }
+        else
+        {
+            data->gas_resistance = calc_gas_resistance_low(adc_gas_res_low, gas_range_l, dev);
+        }
     }
 }
 
